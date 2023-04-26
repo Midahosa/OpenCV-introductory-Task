@@ -1,78 +1,144 @@
-#include <opencv2/opencv.hpp>
-#include <iostream>
+// Include files for required libraries
 #include <stdio.h>
+#include <iostream>
+#include "opencv_aee.hpp"
 #include "opencv2/core.hpp"
+#include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
-using namespace std;
+#include "main.hpp"     // You can use this file for declaring defined values and functions
+#include "pi2c.h"
 using namespace cv;
-
-int main()
+using namespace std;
+Pi2c car(0x22); // Configure the I2C interface to the Car as a global variable
+  
+void setup(void)
 {
+    setupCamera(320, 240);  // Enable the camera for OpenCV
+}
+   
+
+int main( int argc, char** argv )
+{
+    setup();    // Call a setup function to prepare IO and devices
+   //Read images
+	Mat Circle = imread("Circle.jpg");
+	Mat Star = imread("Star.jpg");
+	Mat Triangle = imread("Triangle.jpg");
+	Mat Umbrella = imread("Umbrella.jpg");
+
+	//Convert each image to HSV
+	    //Circle
+	    Mat pink_img1;
+	    Mat CircleHSV;
+	    Mat Circlemask;
+        cv::cvtColor(Circle, CircleHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink1(100, 50, 50);
+        cv::Scalar upper_pink1(180, 255, 255);
+        cv::inRange(CircleHSV, lower_pink1, upper_pink1, Circlemask);
+		cv::bitwise_and(Circle, Circle, pink_img1, Circlemask);
+        //Star
+        Mat pink_img2;
+        Mat StarHSV;
+	    Mat Starmask;
+        cv::cvtColor(Star, StarHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink2(100, 50, 50);
+        cv::Scalar upper_pink2(180, 255, 255);
+        cv::inRange(StarHSV, lower_pink2, upper_pink2, Starmask);
+		cv::bitwise_and(Star, Star, pink_img2, Starmask);
+       //Triangle
+	    Mat pink_img3;
+	    Mat TriangleHSV;
+	    Mat Trianglemask;
+        cv::cvtColor(Triangle, TriangleHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink3(100, 50, 50);
+        cv::Scalar upper_pink3(180, 255, 255);
+        cv::inRange(TriangleHSV, lower_pink3, upper_pink3, Trianglemask);
+		cv::bitwise_and(Triangle, Triangle, pink_img3, Trianglemask);
+        //umbrella
+        Mat pink_img4;
+        Mat UmbrellaHSV;
+	    Mat Umbrellamask;
+        cv::cvtColor(Umbrella, UmbrellaHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink4(100, 50, 50);
+        cv::Scalar upper_pink4(180, 255, 255);
+        cv::inRange(UmbrellaHSV, lower_pink4, upper_pink4, Umbrellamask);
+		cv::bitwise_and(Umbrella, Umbrella, pink_img4, Umbrellamask);
 
 
-    //read image
-    Mat image = imread("image7.jpg");
-
-
-    // convert pink to HSV
-    Mat image_HSV,image_GREY;
-    cvtColor(image, image_HSV, COLOR_BGR2HSV); // Convert the image to HSV
-    inRange(image_HSV, Scalar(150, 50, 50), Scalar(180, 255, 255), image_GREY);
-
-
-
-
-    //make new image of HSV picture
-    cv::imwrite("photo.jpg", image_GREY);
-    //combine two of them ( sort this out later)
-    /*
-        Mat sidebysideImage;
-        cv::hconcat(image, image_GREY, sidebysideImage); // Combine horizontally
-        cv::imwrite("photo.jpg", sidebysideImage); */
-
-
-
-
-
-    // Find contours in the binary image
-    std::vector< std::vector<cv::Point> > contours; // Variable for list of contours
-    cv::findContours(image_GREY, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-    // Create an output image to draw the contours
-    cv::Mat contour_image = cv::Mat::zeros(image_GREY.size(), CV_8UC3);
-
-    // Draw the contours in the output image
-    cv::drawContours(contour_image, contours, -1, cv::Scalar(0, 0, 255), 2);
-
-    // Show the contour image
-    cv::imshow("Contours", contour_image);
-    cv::waitKey(0);
-
-
-
-
-
-
-
-
-
-    if (image.data == NULL)
+    while(1)    // Main loop to perform image processing
     {
-        cout << "No image found! Check path." << endl;
-        return 1;   //ERROR
-    }
-    else // display image
-    {
-        cv::namedWindow("Photo"); // Create a window called photo
-        cv::imshow("Photo", image); // Display the frame matrix in the window
-        cv::namedWindow("Photo grey"); // Create a window called photo
-        cv::imshow("Photo grey", image_GREY);
+        Mat frame;
+        Mat frameHSV;
+        Mat framemask;
+        Mat frame2,eroded,dilated,cannyed;
+        while(frame.empty())
+            frame = captureFrame(); // Capture a frame from the camera and store in a new matrix variable
+            cv::flip(frame,frame,0);
+        cv::imshow("Photo", frame);//Display the image in the window
 
-        cv::imshow("Contours", contour_image);
-        cv::waitKey(0);// Wait for until a key is pressed
+    //perspective transform
+	//std::vector<Point> boundingContour;
+	//Mat transformed = transformPerspective(boundingContour,frame, 350, 350);
+	//cv::imshow("Straight", transformed);
+
+//transfer pink image to black and white
+
+		Mat pink_img;
+        cv::cvtColor(frame, frameHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink(100, 50, 50);
+        cv::Scalar upper_pink(180, 255, 255);
+        cv::inRange(frameHSV, lower_pink, upper_pink, framemask);
+		cv::bitwise_and(frame, frame, pink_img, framemask);
+        cv::imshow("black",framemask);
+//size of camera photo =  320x240
+Mat CirclemaskNew;
+Mat StarmaskNew;
+Mat TrianglemaskNew;
+Mat UmbrellamaskNew;
+
+//cout << framemask.size() ;
+// resize image so i can use compareImage function
+resize(Circlemask,CirclemaskNew,Size(320,240));
+resize(Starmask,StarmaskNew,Size(320,240));
+resize(Trianglemask,TrianglemaskNew,Size(320,240));
+resize(Umbrellamask,UmbrellamaskNew,Size(320,240));
 
 
-        return 0;//OK
-    }
 
+
+
+
+    //compare camera image to the 4 symbols
+	float matchRed =  compareImages(framemask, CirclemaskNew);
+	float matchGreen =  compareImages(framemask, StarmaskNew);
+	float matchBlue =   compareImages(framemask, TrianglemaskNew );
+	float matchYellow = compareImages(framemask, UmbrellamaskNew);
+	
+    //Values are differen threshold values for the match made through trial and error
+	if (matchRed >= 20.0000)
+	{
+		printf("Circle Red line following\n");
+	}
+	else if (matchGreen >= 20.00)
+	{
+		printf("Star Green line following\n");
+	}
+	else if (matchBlue >= 15.00)
+	{
+		printf("Triangle Blue line following\n");
+	}
+	else if (matchYellow >= 15.00)
+	{
+		printf("Umbrella Yellow line following\n");
+	}
+	else
+	{
+		
+	 int key = cv::waitKey(1);   // Wait 1ms for a keypress (required to update windows)
+
+        key = (key==255) ? -1 : key;    // Check if the ESC key has been pressed
+        if (key == 27)
+            break;
+	}
+	}
 }
