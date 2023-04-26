@@ -115,19 +115,19 @@ resize(Umbrellamask,UmbrellamaskNew,Size(320,240));
 	float matchYellow = compareImages(framemask, UmbrellamaskNew);
 	
     //Values are differen threshold values for the match made through trial and error
-	if (matchRed >= 20.0000)
+	if (matchRed >= 25.0000)
 	{
 		printf("Circle Red line following\n");
 	}
-	else if (matchGreen >= 20.00)
+	else if (matchGreen >= 25.00)
 	{
 		printf("Star Green line following\n");
 	}
-	else if (matchBlue >= 15.00)
+	else if (matchBlue >= 23.00)
 	{
 		printf("Triangle Blue line following\n");
 	}
-	else if (matchYellow >= 15.00)
+	else if (matchYellow >= 20.00)
 	{
 		printf("Umbrella Yellow line following\n");
 	}
