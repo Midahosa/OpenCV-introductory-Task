@@ -1,0 +1,293 @@
+// Include files for required libraries
+#include <stdio.h>
+#include <iostream>
+#include "opencv_aee.hpp"
+#include "opencv2/core.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/imgproc.hpp"
+#include "main.hpp"     // You can use this file for declaring defined values and functions
+#include "pi2c.h"
+#include <map>
+using namespace cv;
+using namespace std;
+void runMotors(int leftMotorSpeed, int rightMotorSpeed, int steerAngle);
+//Pi2c car(0x22); // Configure the I2C interface to the Car as a global variable
+Pi2c ESP32(0x04); // set up the I2C slave with address 0x04
+float Kp = 12;  // Proportional gain
+float Ki = 0;  // Integral gain
+float Kd = 0;  // Derivative gain
+float currentError = 0;
+float errorSum = 0;
+float prevError = 0;
+float PIDNum = 0;
+int steerCenter = 89;
+int speedNormal = 85;
+
+
+float setpoint = 160; // Setpoint for line following
+float testpoint=0;
+int lowH, highH, lowS, highS, lowV, highV;
+void setup(void)
+{
+    setupCamera(320, 240);  // Enable the camera for OpenCV
+}
+void colourPicker(int colourNum)
+{
+    std::map<int, std::tuple<int, int, int, int, int, int>> colorRanges;
+
+    colorRanges[0] = std::make_tuple(0, 40, 140, 255, 90, 135);     // Red
+    colorRanges[1] = std::make_tuple(75, 90, 140, 255, 65, 255);   // Green
+    colorRanges[2] = std::make_tuple(95, 110, 150, 255, 0, 255);   // Blue
+    colorRanges[3] = std::make_tuple(0, 0, 0, 0, 0, 0);             // Yellow (empty range)
+    colorRanges[4] = std::make_tuple(40, 90, 75, 165, 0, 110);     // Black
+
+    if (colorRanges.count(colourNum) > 0)
+    {
+        std::tie(lowH, highH, lowS, highS, lowV, highV) = colorRanges[colourNum];
+    }
+}
+
+void runMotors(int leftMotorSpeed, int rightMotorSpeed, int steeringAngle)
+{
+//Restrict the steering angle
+    if(steeringAngle < 30)
+    {
+        steeringAngle = 30;
+    }
+    if(steeringAngle > 150)
+    {
+        steeringAngle = 150;
+    }
+    if((leftMotorSpeed != 0)||(rightMotorSpeed != 0))
+    {
+        if(leftMotorSpeed > (speedNormal + 85))
+        {
+            leftMotorSpeed = (speedNormal + 85);
+        }
+        if(rightMotorSpeed > (speedNormal + 85))
+        {
+            rightMotorSpeed = (speedNormal + 85);
+        }
+    }
+    char dataSending[6];
+    dataSending[0] = (char)((leftMotorSpeed & 0x0000FF00) >> 8);
+    dataSending[1] = (char)(leftMotorSpeed & 0x000000FF);   // Inputting both bytes of leftMotorSpeed to the dataSending array of bytes (char)
+    dataSending[2] = (char)((rightMotorSpeed & 0x0000FF00) >> 8);
+    dataSending[3] = (char)(rightMotorSpeed & 0x000000FF);  // Inputting both bytes of rightMotorSpeed to the dataSending array of bytes (char)
+    dataSending[4] = (char)((steeringAngle & 0x0000FF00) >> 8);
+    dataSending[5] = (char)(steeringAngle & 0x000000FF);    // Inputting both bytes of steeringAngle to the dataSending array of bytes (char)
+    ESP32.i2cWrite(dataSending,6);
+}
+
+int main( int argc, char** argv )
+{
+    setup();    // Call a setup function to prepare IO and devices
+//
+//    cv::namedWindow("Photo");   // Create a GUI window called photo
+//    cv::namedWindow("black");
+//
+
+    //Read images
+    Mat Circle = imread("Circle.jpg");
+    Mat Star = imread("Star.jpg");
+    Mat Triangle = imread("Triangle.jpg");
+    Mat Umbrella = imread("Umbrella.jpg");
+
+    //Convert each image to HSV
+    //Circle
+    Mat pink_img1;
+    Mat CircleHSV;
+    Mat Circlemask;
+    cv::cvtColor(Circle, CircleHSV, cv::COLOR_BGR2HSV);
+    cv::Scalar lower_pink1(100, 50, 50);
+    cv::Scalar upper_pink1(180, 255, 255);
+    cv::inRange(CircleHSV, lower_pink1, upper_pink1, Circlemask);
+    cv::bitwise_and(Circle, Circle, pink_img1, Circlemask);
+    //Star
+    Mat pink_img2;
+    Mat StarHSV;
+    Mat Starmask;
+    cv::cvtColor(Star, StarHSV, cv::COLOR_BGR2HSV);
+    cv::Scalar lower_pink2(100, 50, 50);
+    cv::Scalar upper_pink2(180, 255, 255);
+    cv::inRange(StarHSV, lower_pink2, upper_pink2, Starmask);
+    cv::bitwise_and(Star, Star, pink_img2, Starmask);
+    //Triangle
+    Mat pink_img3;
+    Mat TriangleHSV;
+    Mat Trianglemask;
+    cv::cvtColor(Triangle, TriangleHSV, cv::COLOR_BGR2HSV);
+    cv::Scalar lower_pink3(100, 50, 50);
+    cv::Scalar upper_pink3(180, 255, 255);
+    cv::inRange(TriangleHSV, lower_pink3, upper_pink3, Trianglemask);
+    cv::bitwise_and(Triangle, Triangle, pink_img3, Trianglemask);
+    //umbrella
+    Mat pink_img4;
+    Mat UmbrellaHSV;
+    Mat Umbrellamask;
+    cv::cvtColor(Umbrella, UmbrellaHSV, cv::COLOR_BGR2HSV);
+    cv::Scalar lower_pink4(100, 50, 50);
+    cv::Scalar upper_pink4(180, 255, 255);
+    cv::inRange(UmbrellaHSV, lower_pink4, upper_pink4, Umbrellamask);
+    cv::bitwise_and(Umbrella, Umbrella, pink_img4, Umbrellamask);
+
+
+    while(1)    // Main loop to perform image processing
+    {
+        Mat frame;
+        Mat frameHSV;
+        Mat framemask;
+        Mat frame2,eroded,dilated,cannyed;
+        while(frame.empty())
+            frame = captureFrame(); // Capture a frame from the camera and store in a new matrix variable
+        cv::flip(frame,frame,0);
+        cv::imshow("Photo", frame);//Display the image in the window
+
+        //perspective transform
+        //std::vector<Point> boundingContour;
+        //Mat transformed = transformPerspective(boundingContour,frame, 350, 350);
+        //cv::imshow("Straight", transformed);
+
+//transfer pink image to black and white
+
+        Mat pink_img;
+        cv::cvtColor(frame, frameHSV, cv::COLOR_BGR2HSV);
+        cv::Scalar lower_pink(100, 50, 50);
+        cv::Scalar upper_pink(180, 255, 255);
+        cv::inRange(frameHSV, lower_pink, upper_pink, framemask);
+        cv::bitwise_and(frame, frame, pink_img, framemask);
+        cv::imshow("black",framemask);
+//size of camera photo =  320x240
+        Mat CirclemaskNew;
+        Mat StarmaskNew;
+        Mat TrianglemaskNew;
+        Mat UmbrellamaskNew;
+
+//cout << framemask.size() ;
+// resize image so i can use compareImage function
+        resize(Circlemask,CirclemaskNew,Size(320,240));
+        resize(Starmask,StarmaskNew,Size(320,240));
+        resize(Trianglemask,TrianglemaskNew,Size(320,240));
+        resize(Umbrellamask,UmbrellamaskNew,Size(320,240));
+
+        std::vector< std::vector<cv::Point> > contours; // Variable for list of contours
+
+
+
+        //Match images
+
+        float matchRed =  compareImages(framemask, CirclemaskNew);
+        float matchGreen =  compareImages(framemask, StarmaskNew);
+        float matchBlue =   compareImages(framemask, TrianglemaskNew );
+        float matchYellow = compareImages(framemask, UmbrellamaskNew);
+        Mat framemask1;
+
+        if (matchRed >= 30.0000)
+        {
+            printf("Circle Red line following Match rating %f\n",matchRed);
+            Mat red_img;
+            Mat redHSV;
+
+            cv::cvtColor(frame, redHSV, cv::COLOR_BGR2HSV);
+            cv::Scalar lower_red(0,100,100);
+            cv::Scalar upper_red(73, 255, 255);
+            cv::inRange(redHSV, lower_red, upper_red, framemask1);
+            cv::bitwise_and(frame, frame, red_img, framemask1);
+
+        }
+        else if (matchGreen >= 30.00)
+        {
+            printf("Star Green line following Match rating %f\n",matchGreen);
+
+            Mat green_img;
+            Mat greenHSV;
+            cv::cvtColor(frame, greenHSV, cv::COLOR_BGR2HSV);
+            cv::Scalar lower_green(35,68,57);
+            cv::Scalar upper_green(73, 255, 255);
+            cv::inRange(greenHSV, lower_green, upper_green, framemask1);
+            cv::bitwise_and(frame, frame, green_img, framemask1);
+        }
+        else if (matchBlue >= 30.00)
+        {
+            printf("Triangle Blue line following Match rating %f\n",matchBlue);
+
+            Mat blue_img;
+            Mat blueHSV;
+            cv::cvtColor(frame, blueHSV, cv::COLOR_BGR2HSV);
+            cv::Scalar lower_blue(0,100,100);
+            cv::Scalar upper_blue(73, 255, 255);
+            cv::inRange(blueHSV, lower_blue, upper_blue, framemask1);
+            cv::bitwise_and(frame, frame, blue_img, framemask1);
+        }
+        else if (matchYellow >= 30.00)
+        {
+            printf("Umbrella Yellow line following Match rating %f\n",matchYellow);
+
+            Mat yellow_img;
+            Mat yellowHSV;
+            cv::cvtColor(frame, yellowHSV, cv::COLOR_BGR2HSV);
+            cv::Scalar lower_yellow(20,50,50);
+            cv::Scalar upper_yellow(40, 255, 255);
+            cv::inRange(yellowHSV, lower_yellow, upper_yellow, framemask1);
+            cv::bitwise_and(frame, frame, yellow_img, framemask1);
+
+        }
+        else
+        {
+
+           //transfer colorful image to black and white
+             Mat blackmask;
+             cv::cvtColor(frame,frameHSV,COLOR_BGR2GRAY);
+             cv::threshold(frameHSV,framemask1,55,255,THRESH_BINARY);
+             cv::bitwise_not(framemask1,framemask1);
+             cv::imshow("black1",framemask1);
+         }
+            long pixelNum[0];
+            float xs;
+            int colPointer = 0;
+            for (int c = 0; c < framemask1.cols; c += 32)
+            {
+                cv::Mat tile = framemask1(cv::Range(200, std::min(240, framemask1.rows)), cv::Range(c, std::min(c + 32, framemask1.cols)));
+
+                pixelNum[colPointer] = cv::countNonZero(tile);
+                colPointer++;
+            }
+
+
+            int key = cv::waitKey(1);
+            int xS = 0;
+            double sumVal = 0;
+
+
+            for (int i = 0; i < 10; i++)
+            {
+                xS += (i + 1) * pixelNum[i];
+                sumVal += pixelNum[i];
+            }
+
+            float weightedAvg = static_cast<float>(xS) / static_cast<float>(sumVal);
+            currentError = 5.5 - weightedAvg;
+
+            if (cv::countNonZero(framemask1) > 100)
+            {
+                PIDNum = (Kp * currentError) + (Ki * errorSum) + (Kd * (currentError - prevError));
+                prevError = currentError;
+                errorSum += currentError;
+                runMotors((speedNormal - (0.85 * PIDNum)), (speedNormal + (0.85 * PIDNum)), (steerCenter - PIDNum));
+                std::cout << "runMotors" << std::endl;
+                //runMotors(0, 0, (steerCenter - PIDNum));
+//
+            }
+
+
+
+
+
+
+    }
+    closeCV();  // Disable the camera and close any windows
+}
+
+
+//
+//
