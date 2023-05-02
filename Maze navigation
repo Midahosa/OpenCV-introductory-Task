@@ -1,0 +1,264 @@
+include <Wire.h>
+#include <MPU6050_tockn.h>
+#include <LiquidCrystal.h>
+#include <Keypad.h>
+ 
+MPU6050 imu(Wire);
+ 
+private:
+  int l, r, a,
+    enc[2], prevEnc[2],
+    distance,
+    minimumS = 110, maximumS = 150;
+ 
+  void send(int x) {
+    Wire.write((byte)((x & 0x0000FF00) >> 8));
+    Wire.write((byte)(x & 0x000000FF));
+  }
+ 
+  void set(int left, int right, int angle) {
+  if (l == left && r == right && a == angle) return; // do nothing
+  
+  Wire.beginTransmission(0x04);
+  send(left);
+  send(right);
+  send(angle);
+  Wire.endTransmission();
+
+  l = left;
+  r = right;
+  a = angle;
+} 
+  int travel() {
+    int enc[2];
+    int prevEnc[2] = {0, 0};
+    int distance = 0;
+
+    Wire.requestFrom(0x04, 2);
+
+    for (int i = 0; i < 2; i++) {
+        if (Wire.available()) {
+            enc[i] = Wire.read();
+            if (enc[i] < 0) break;
+
+            if (prevEnc[i] > enc[i]) distance += 255;
+            distance += enc[i] - prevEnc[i];
+            prevEnc[i] = enc[i];
+            Serial.println(distance);
+        }
+    }
+
+    return distance / 2;
+}  
+int originalPos() {
+    imu.calcGyroOffsets(0, 0);
+    imu.update();
+    return imu.getAngleZ();
+  }
+ 
+  void ahead() {
+    set(minimumS, maximumS, a);
+  }
+ 
+void steer(int angle) {
+    int i, motor[2];
+
+    // Determine which motor should be adjusted based on the angle sign
+    if (angle < 0) {
+        i = 0;
+    } else {
+        i = 1;
+    }
+
+    // Calculate the pulse width for the adjusted motor
+    float motor_ratio = (float)(angle) / 90.0;
+    int motor_width = minimumS + (maximumS - minimumS) * sin(M_PI * motor_ratio);
+
+    // Calculate the pulse width for the non-adjusted motor
+    int non_adjusted_width = maximumS;
+
+    // Assign the pulse widths to the motor array
+    motor[i] = motor_width;
+    motor[(i+1)%2] = non_adjusted_width;
+
+    // Send the pulse widths and angle to the robot
+    set(motor[0], motor[1], angle + 90);
+} 
+  void stop() {
+    set(0, 0, 90);
+    distance = 0;
+  }
+ 
+public:
+  void forward(int times) {
+    if (times > 0) {
+        int origin = originalPos();
+ 
+        ahead();
+        int distanceTraveled = 0;
+        while (distanceTraveled < 14.2 * (float)times) {
+            imu.update();
+            int currentAngle = imu.getAngleZ();
+            int angleDifference = currentAngle - origin;
+            steer(angleDifference);
+ 
+            distanceTraveled = travel();
+        }
+        stop();
+ 
+        Serial.print("Times moved forward: ");
+        Serial.println(times);
+    }
+}
+
+
+  void turn(int angle) {
+  int origin = originalPos();
+  int targetAngle = origin + angle * 2;
+  
+  ahead();
+
+  while (true) {
+    imu.update();
+    int currentAngle = imu.getAngleZ();
+
+    if (abs(currentAngle - origin) >= abs(angle)) {
+      stop();
+      Serial.println(angle / 2);
+      break;
+    } else {
+      int steeringAngle = targetAngle - currentAngle;
+      steer(steeringAngle);
+    }
+  }
+}
+ 
+  void resetDistance() {
+    travel();
+    distance = 0;
+  }
+};
+ 
+class Maze {
+private:
+  char keys[4][3] = {
+    { '1', '2', '3' },
+    { '4', '5', '6' },
+    { '7', '8', '9' },
+    { '#', '0', '*' }
+  };
+  byte rowPins[4] = { 23, 4, 19, 18 };  //connect to the row pinouts of the keypad
+  byte colPins[3] = { 5, 17, 16 };      //connect to the column pinouts of the keypad
+ 
+  LiquidCrystal *lcd;
+  Keypad *keypad;
+ 
+  String menu;
+ 
+public:
+  String maze = "";
+ 
+  void clear() {
+    lcd->clear();
+    lcd->setCursor(0, 0);
+ 
+    for (char c : menu) {
+      lcd->write(c);
+    }
+ 
+    lcd->setCursor(0, 1);
+  }
+ 
+  Maze() {
+    menu = "4=< 8=^ 6=>";
+   
+    lcd = new LiquidCrystal(32, 33, 25, 26, 27, 14);
+    keypad = new Keypad(makeKeymap(keys), rowPins, colPins, 4, 3);
+ 
+    lcd->begin(16, 2);
+    clear();
+  }
+ 
+  bool execute() {
+    return maze.indexOf('#') >= 0;
+  }
+ 
+  char getKey() {
+    return keypad->getKey();
+  }
+ 
+  void add(char key) {
+    maze += key;
+    lcd->write(key);
+  }
+ 
+  void backspace() {
+    if (!maze.isEmpty()) {
+      maze.remove(maze.length() - 1);
+    }
+ 
+    clear();
+ 
+    for (char c : maze) {
+      lcd->write(c);
+    }
+  }
+};
+ 
+Nano nano;
+Maze maze;
+ 
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  imu.calcGyroOffsets();
+}
+ 
+void loop() {
+  getInput();
+  delay(1000);
+  solveMaze();
+  clear();
+}
+ 
+void getInput() {
+  String valid = "7846*#";
+ 
+  while (!execute()) {
+    char key = getKey();
+ 
+    if (valid.indexOf(key) >= 0) {
+      if (key == '*') {
+             clear();
+      } else if (key == '7') {
+             backspace();
+      } else {
+        maze.add(key);
+      }
+    }
+  }
+}
+ 
+void solveMaze() {
+  int count = 0;
+ 
+  for (char instruction :maze) {
+    if (count) {
+      count = (int)instruction - 48;
+      		forward(count);
+      count = 0;
+    } else {
+      		resetDistance();
+ 
+if (instruction == '4') {
+  turn(-90);
+} else if (instruction == '6') {
+  turn(90);
+} else if (instruction == '8') {
+  count = 1;
+} else {
+  // default case
+}          return;
+      }
+    }
+  }
